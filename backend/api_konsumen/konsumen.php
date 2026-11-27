@@ -4,30 +4,87 @@ declare(strict_types=1);
 
 require __DIR__ . '/db.php';
 
-header('Content-Type: application/json; charset=utf-8');
-
-if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-    header('Allow: GET');
-    http_response_code(405);
-    echo json_encode(['pesan' => 'Metode HTTP tidak didukung.']);
+function balas(int $status, array $isi): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($isi, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     exit;
 }
 
+function bacaKonsumen(): array
+{
+    $input = json_decode(file_get_contents('php://input'));
+    if (!is_object($input)) {
+        balas(400, ['pesan' => 'Body harus berupa objek JSON.']);
+    }
+
+    $nilai = [];
+    $batas = ['nama' => 100, 'email' => 150, 'telepon' => 25, 'alamat' => 255];
+
+    foreach ($batas as $kolom => $maksimum) {
+        $teks = $input->$kolom ?? null;
+        $teks = is_string($teks) ? trim($teks) : '';
+
+        if ($teks === '' || mb_strlen($teks, 'UTF-8') > $maksimum) {
+            balas(422, ['pesan' => "$kolom wajib diisi, maksimal $maksimum karakter."]);
+        }
+
+        $nilai[$kolom] = $teks;
+    }
+
+    if (!filter_var($nilai['email'], FILTER_VALIDATE_EMAIL)) {
+        balas(422, ['pesan' => 'Format email tidak valid.']);
+    }
+
+    return $nilai;
+}
+
+$metode = $_SERVER['REQUEST_METHOD'];
+if (!in_array($metode, ['GET', 'POST'], true)) {
+    header('Allow: GET, POST');
+    balas(405, ['pesan' => 'Metode HTTP tidak didukung.']);
+}
+
+$id = null;
+if (isset($_GET['id'])) {
+    $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
+        'options' => ['min_range' => 1, 'max_range' => 4294967295],
+    ]);
+
+    if (!$id || $metode === 'POST') {
+        balas(400, ['pesan' => 'Periksa parameter id.']);
+    }
+}
+
 try {
+    if ($metode === 'POST') {
+        $nilai = bacaKonsumen();
+        $db = bukaDatabase();
+        $sql = 'INSERT INTO konsumen (nama, email, telepon, alamat)
+                VALUES (:nama, :email, :telepon, :alamat)';
+        $db->prepare($sql)->execute($nilai);
+        balas(201, ['id' => (int) $db->lastInsertId()]);
+    }
+
     $db = bukaDatabase();
+    $sql = 'SELECT id, nama, email, telepon, alamat FROM konsumen';
 
-    $query = $db->query(
-        'SELECT id, nama, email, telepon, alamat
-         FROM konsumen
-         ORDER BY id DESC'
-    );
+    if ($id === null) {
+        $data = $db->query($sql . ' ORDER BY id DESC')->fetchAll();
+        balas(200, ['data' => $data]);
+    }
 
-    echo json_encode(
-        ['data' => $query->fetchAll()],
-        JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
-    );
+    $query = $db->prepare($sql . ' WHERE id = ?');
+    $query->execute([$id]);
+    $data = $query->fetch();
+
+    if ($data === false) {
+        balas(404, ['pesan' => 'Konsumen tidak ditemukan.']);
+    }
+
+    balas(200, ['data' => $data]);
 } catch (Throwable $error) {
     error_log($error->getMessage());
-    http_response_code(500);
-    echo json_encode(['pesan' => 'Kesalahan server. Periksa log PHP.']);
+    balas(500, ['pesan' => 'Kesalahan server. Periksa log PHP.']);
 }
