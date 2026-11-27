@@ -41,13 +41,13 @@ function bacaKonsumen(): array
 }
 
 $metode = $_SERVER['REQUEST_METHOD'];
-if (!in_array($metode, ['GET', 'POST'], true)) {
-    header('Allow: GET, POST');
+if (!in_array($metode, ['GET', 'POST', 'PUT', 'DELETE'], true)) {
+    header('Allow: GET, POST, PUT, DELETE');
     balas(405, ['pesan' => 'Metode HTTP tidak didukung.']);
 }
 
 $id = null;
-if (isset($_GET['id'])) {
+if (isset($_GET['id']) || in_array($metode, ['PUT', 'DELETE'], true)) {
     $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, [
         'options' => ['min_range' => 1, 'max_range' => 4294967295],
     ]);
@@ -68,6 +68,28 @@ try {
     }
 
     $db = bukaDatabase();
+        if ($metode === 'PUT' || $metode === 'DELETE') {
+            if ($metode === 'PUT') {
+                $nilai = bacaKonsumen();
+                $sql = 'UPDATE konsumen
+                        SET nama = :nama, email = :email, telepon = :telepon, alamat = :alamat
+                        WHERE id = :id';
+                $query = $db->prepare($sql);
+                $query->execute($nilai + ['id' => $id]);
+                $pesan = 'Data diperbarui.';
+            } else {
+                $query = $db->prepare('DELETE FROM konsumen WHERE id = ?');
+                $query->execute([$id]);
+                $pesan = 'Data dihapus.';
+            }
+
+            if ($query->rowCount() === 0) {
+                balas(404, ['pesan' => 'Konsumen tidak ditemukan.']);
+            }
+
+            balas(200, ['pesan' => $pesan]);
+        }
+
     $sql = 'SELECT id, nama, email, telepon, alamat FROM konsumen';
 
     if ($id === null) {
