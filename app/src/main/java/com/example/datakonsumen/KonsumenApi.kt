@@ -9,14 +9,26 @@ import java.net.URL
 object KonsumenApi {
     private const val ENDPOINT = "http://10.0.2.2/api_konsumen/konsumen.php"
 
-    fun ambilDaftar(): JSONArray {
+    fun ambilDaftar(): JSONArray = request("GET").getJSONArray("data")
+
+    fun tambahKonsumen(data: JSONObject): Long = request("POST", data).getLong("id")
+
+    private fun request(metode: String, body: JSONObject? = null): JSONObject {
         val koneksi = URL(ENDPOINT).openConnection() as HttpURLConnection
 
         try {
-            koneksi.requestMethod = "GET"
+            koneksi.requestMethod = metode
             koneksi.connectTimeout = 8_000
             koneksi.readTimeout = 8_000
             koneksi.setRequestProperty("Accept", "application/json")
+
+            if (body != null) {
+                val payload = body.toString().toByteArray(Charsets.UTF_8)
+                koneksi.doOutput = true
+                koneksi.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                koneksi.setFixedLengthStreamingMode(payload.size)
+                koneksi.outputStream.use { it.write(payload) }
+            }
 
             val kode = koneksi.responseCode
             val berhasil = kode in 200..299
@@ -29,7 +41,7 @@ object KonsumenApi {
                 throw IOException("HTTP $kode. $pesan")
             }
 
-            return JSONObject(teks).getJSONArray("data")
+            return JSONObject(teks)
         } finally {
             koneksi.disconnect()
         }
