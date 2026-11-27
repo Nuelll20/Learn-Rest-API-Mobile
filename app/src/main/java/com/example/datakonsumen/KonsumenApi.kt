@@ -11,10 +11,23 @@ object KonsumenApi {
 
     fun ambilDaftar(): JSONArray = request("GET").getJSONArray("data")
 
-    fun tambahKonsumen(data: JSONObject): Long = request("POST", data).getLong("id")
+    fun tambahKonsumen(data: JSONObject): Long = request("POST", body = data).getLong("id")
 
-    private fun request(metode: String, body: JSONObject? = null): JSONObject {
-        val koneksi = URL(ENDPOINT).openConnection() as HttpURLConnection
+    fun ubahKonsumen(id: Long, data: JSONObject) {
+        request("PUT", id, data)
+    }
+
+    fun hapusKonsumen(id: Long) {
+        request("DELETE", id)
+    }
+
+    private fun request(
+        metode: String,
+        id: Long? = null,
+        body: JSONObject? = null
+    ): JSONObject {
+        val alamat = if (id == null) ENDPOINT else "$ENDPOINT?id=$id"
+        val koneksi = URL(alamat).openConnection() as HttpURLConnection
 
         try {
             koneksi.requestMethod = metode
