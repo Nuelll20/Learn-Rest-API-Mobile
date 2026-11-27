@@ -1,8 +1,11 @@
 package com.example.datakonsumen
 
+import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
+import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -26,9 +29,12 @@ class MainActivity : ComponentActivity() {
     private val formulir = linkedMapOf<String, EditText>()
     private lateinit var pesan: TextView
     private lateinit var daftar: LinearLayout
-    private lateinit var tombolTambah: Button
+    private lateinit var scroll: ScrollView
+    private lateinit var tombolSimpan: Button
+    private lateinit var tombolBatal: Button
+    private lateinit var tombolHapus: Button
     private lateinit var tombolMuatUlang: Button
-    private var idTerakhirTampil: Long? = null
+    private var revisiFormulirTampil = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,7 +45,8 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             isFocusableInTouchMode = true
         }
-        val scroll = ScrollView(this).apply {
+
+        scroll = ScrollView(this).apply {
             addView(panel)
             setOnApplyWindowInsetsListener { _, insets ->
                 val tepi = insets.getInsets(
@@ -61,15 +68,32 @@ class MainActivity : ComponentActivity() {
             textSize = 26f
             isAccessibilityHeading = true
         })
-        idTerakhirTampil = model.status.value.idTersimpan
+
+        revisiFormulirTampil = model.status.value.revisiFormulir
         buatFormulir(panel)
 
-        tombolTambah = Button(this).apply {
+        tombolSimpan = Button(this).apply {
             text = "Tambah konsumen"
             isAllCaps = false
             setOnClickListener { simpan() }
         }
-        panel.addView(tombolTambah)
+        panel.addView(tombolSimpan)
+
+        tombolBatal = Button(this).apply {
+            text = "Batal edit"
+            isAllCaps = false
+            visibility = View.GONE
+            setOnClickListener { model.batalEdit() }
+        }
+        panel.addView(tombolBatal)
+
+        tombolHapus = Button(this).apply {
+            text = "Hapus konsumen"
+            isAllCaps = false
+            visibility = View.GONE
+            setOnClickListener { konfirmasiHapus() }
+        }
+        panel.addView(tombolHapus)
 
         tombolMuatUlang = Button(this).apply {
             text = "Muat ulang daftar"
@@ -80,6 +104,7 @@ class MainActivity : ComponentActivity() {
 
         pesan = TextView(this).apply { textSize = 15f }
         panel.addView(pesan)
+
         daftar = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         panel.addView(daftar)
         panel.requestFocus()
@@ -106,6 +131,7 @@ class MainActivity : ComponentActivity() {
                 setText(model.draf[kolom].orEmpty())
                 doAfterTextChanged { model.draf[kolom] = it?.toString().orEmpty() }
             }
+
             formulir[kolom] = edit
             panel.addView(edit)
         }
@@ -113,6 +139,7 @@ class MainActivity : ComponentActivity() {
 
     private fun simpan() {
         val data = JSONObject()
+
         for ((kolom, edit) in formulir) {
             val nilai = edit.text.toString().trim()
             if (nilai.isEmpty()) {
@@ -130,26 +157,48 @@ class MainActivity : ComponentActivity() {
         model.simpan(data)
     }
 
+    private fun konfirmasiHapus() {
+        val konsumen = model.status.value.dipilih ?: return
+
+        AlertDialog.Builder(this)
+            .setTitle("Hapus konsumen?")
+            .setMessage("#${konsumen.id} · ${konsumen.nama}")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ -> model.hapus(konsumen.id) }
+            .show()
+    }
+
     private fun tampilkan(status: StatusKonsumen) {
-        tombolTambah.isEnabled = !status.sibuk
+        val sedangEdit = status.dipilih != null
+        tombolSimpan.text = if (sedangEdit) "Simpan perubahan" else "Tambah konsumen"
+        tombolSimpan.isEnabled = !status.sibuk
         tombolMuatUlang.isEnabled = !status.sibuk
+        tombolBatal.visibility = if (sedangEdit) View.VISIBLE else View.GONE
+        tombolHapus.visibility = tombolBatal.visibility
+        tombolBatal.isEnabled = !status.sibuk
+        tombolHapus.isEnabled = !status.sibuk
         formulir.values.forEach { it.isEnabled = !status.sibuk }
         pesan.text = status.pesan
 
-        if (idTerakhirTampil != status.idTersimpan) {
-            formulir.values.forEach {
-                it.text.clear()
-                it.error = null
+        if (revisiFormulirTampil != status.revisiFormulir) {
+            for ((kolom, edit) in formulir) {
+                edit.error = null
+                edit.setText(model.draf[kolom].orEmpty())
             }
-            idTerakhirTampil = status.idTersimpan
+            revisiFormulirTampil = status.revisiFormulir
         }
 
         daftar.removeAllViews()
-        status.daftar.forEach { ringkasan ->
-            daftar.addView(TextView(this).apply {
-                text = ringkasan
-                textSize = 16f
-                setPadding(0, dp(8), 0, dp(8))
+        for (konsumen in status.daftar) {
+            daftar.addView(Button(this).apply {
+                text = "#${konsumen.id} · ${konsumen.nama}\n${konsumen.email}"
+                isAllCaps = false
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                isEnabled = !status.sibuk
+                setOnClickListener {
+                    model.pilih(konsumen)
+                    scroll.smoothScrollTo(0, 0)
+                }
             })
         }
     }

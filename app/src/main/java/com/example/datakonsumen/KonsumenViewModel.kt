@@ -11,11 +11,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+data class Konsumen(
+    val id: Long,
+    val nama: String,
+    val email: String,
+    val telepon: String,
+    val alamat: String
+)
+
 data class StatusKonsumen(
-    val daftar: List<String> = emptyList(),
+    val daftar: List<Konsumen> = emptyList(),
     val pesan: String = "",
     val sibuk: Boolean = false,
-    val idTersimpan: Long? = null
+    val dipilih: Konsumen? = null,
+    val revisiFormulir: Long = 0
 )
 
 class KonsumenViewModel : ViewModel() {
@@ -32,24 +41,73 @@ class KonsumenViewModel : ViewModel() {
         viewModelScope.launch { ambilDaftar() }
     }
 
-    fun simpan(data: JSONObject) {
+    fun pilih(konsumen: Konsumen) {
         if (_status.value.sibuk) return
-        _status.update { it.copy(sibuk = true, pesan = "Menyimpan konsumen…") }
+        aturFormulir(konsumen)
+        _status.update { it.copy(pesan = "Mengedit konsumen #${konsumen.id}.") }
+    }
+
+    fun batalEdit() {
+        if (_status.value.sibuk) return
+        aturFormulir()
+        _status.update { it.copy(pesan = "Edit dibatalkan.") }
+    }
+
+    fun simpan(data: JSONObject) {
+        val id = _status.value.dipilih?.id
+
+        ubahData("Menyimpan konsumen…", "Gagal menyimpan.") {
+            if (id == null) {
+                val idBaru = KonsumenApi.tambahKonsumen(data)
+                "Konsumen #$idBaru tersimpan."
+            } else {
+                KonsumenApi.ubahKonsumen(id, data)
+                "Konsumen #$id diperbarui."
+            }
+        }
+    }
+
+    fun hapus(id: Long) {
+        if (_status.value.dipilih?.id != id) return
+
+        ubahData("Menghapus konsumen…", "Gagal menghapus.") {
+            KonsumenApi.hapusKonsumen(id)
+            "Konsumen #$id dihapus."
+        }
+    }
+
+    private fun aturFormulir(konsumen: Konsumen? = null) {
+        draf.clear()
+        if (konsumen != null) {
+            draf["nama"] = konsumen.nama
+            draf["email"] = konsumen.email
+            draf["telepon"] = konsumen.telepon
+            draf["alamat"] = konsumen.alamat
+        }
+
+        _status.update {
+            it.copy(dipilih = konsumen, revisiFormulir = it.revisiFormulir + 1)
+        }
+    }
+
+    private fun ubahData(pesanMulai: String, pesanGagal: String, kerja: () -> String) {
+        if (_status.value.sibuk) return
+        _status.update { it.copy(sibuk = true, pesan = pesanMulai) }
 
         viewModelScope.launch {
-            val id = try {
-                withContext(Dispatchers.IO) { KonsumenApi.tambahKonsumen(data) }
+            val pesanSukses = try {
+                withContext(Dispatchers.IO) { kerja() }
             } catch (error: Exception) {
                 if (error is CancellationException) throw error
+
                 _status.update {
-                    it.copy(sibuk = false, pesan = "Gagal menyimpan. ${error.message.orEmpty()}")
+                    it.copy(sibuk = false, pesan = "$pesanGagal ${error.message.orEmpty()}")
                 }
                 return@launch
             }
 
-            draf.clear()
-            _status.update { it.copy(idTersimpan = id) }
-            ambilDaftar("Konsumen #$id tersimpan. ")
+            aturFormulir()
+            ambilDaftar("$pesanSukses ")
         }
     }
 
@@ -61,16 +119,25 @@ class KonsumenViewModel : ViewModel() {
                 val data = KonsumenApi.ambilDaftar()
                 List(data.length()) { indeks ->
                     val baris = data.getJSONObject(indeks)
-                    "#${baris.getLong("id")} · ${baris.getString("nama")}\n" +
-                            baris.getString("email")
+                    Konsumen(
+                        id = baris.getLong("id"),
+                        nama = baris.getString("nama"),
+                        email = baris.getString("email"),
+                        telepon = baris.getString("telepon"),
+                        alamat = baris.getString("alamat")
+                    )
                 }
             }
+
             val ringkasan = if (pelanggan.isEmpty()) "Belum ada konsumen."
             else "${pelanggan.size} konsumen"
 
-            _status.update { it.copy(daftar = pelanggan, pesan = awalan + ringkasan, sibuk = false) }
+            _status.update {
+                it.copy(daftar = pelanggan, pesan = awalan + ringkasan, sibuk = false)
+            }
         } catch (error: Exception) {
             if (error is CancellationException) throw error
+
             _status.update {
                 it.copy(
                     pesan = awalan + "Gagal memuat data. ${error.message.orEmpty()}",
